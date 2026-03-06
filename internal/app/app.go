@@ -67,6 +67,7 @@ func (a *App) Run() error {
 
 			// Process editor submit
 			if cmd, ok := a.editor.Update(gtx); ok && cmd != "" {
+				a.editor.AddHistory(cmd)
 				a.engine.Execute(cmd)
 			}
 

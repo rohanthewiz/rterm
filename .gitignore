@@ -1,4 +1,5 @@
 # Binaries
+main
 *.exe
 *.dll
 *.so
@@ -9,6 +10,7 @@ dist/
 build/
 *.o
 *.a
+
 
 # Dependencies
 vendor/

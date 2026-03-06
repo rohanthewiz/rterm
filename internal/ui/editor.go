@@ -15,7 +15,8 @@ import (
 
 // EditorWidget is the command input area.
 type EditorWidget struct {
-	editor widget.Editor
+	editor  widget.Editor
+	history History
 }
 
 // NewEditorWidget creates a new editor.
@@ -26,8 +27,41 @@ func NewEditorWidget() *EditorWidget {
 	return e
 }
 
-// Update checks for submit events and returns the submitted command, if any.
+// Update checks for history navigation and submit events, returning the
+// submitted command if Enter was pressed.
 func (e *EditorWidget) Update(gtx layout.Context) (string, bool) {
+	// Poll for Up/Down arrow key events before the editor can consume them.
+	// This gives Up/Down arrow keys terminal-style history recall semantics
+	// (Up = previous command, Down = next command) regardless of cursor position.
+	for {
+		ev, ok := gtx.Event(
+			key.Filter{Focus: &e.editor, Name: key.NameUpArrow},
+			key.Filter{Focus: &e.editor, Name: key.NameDownArrow},
+		)
+		if !ok {
+			break
+		}
+		ke, ok := ev.(key.Event)
+		if !ok || ke.State != key.Press {
+			continue
+		}
+		switch ke.Name {
+		case key.NameUpArrow:
+			if cmd, ok := e.history.Previous(e.editor.Text()); ok {
+				n := len([]rune(cmd))
+				e.editor.SetText(cmd)
+				e.editor.SetCaret(n, n)
+			}
+		case key.NameDownArrow:
+			if cmd, ok := e.history.Next(); ok {
+				n := len([]rune(cmd))
+				e.editor.SetText(cmd)
+				e.editor.SetCaret(n, n)
+			}
+		}
+	}
+
+	// Poll editor for submitted commands.
 	for {
 		ev, ok := e.editor.Update(gtx)
 		if !ok {
@@ -40,6 +74,11 @@ func (e *EditorWidget) Update(gtx layout.Context) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// AddHistory records a command in history.
+func (e *EditorWidget) AddHistory(cmd string) {
+	e.history.Add(cmd)
 }
 
 // Layout renders the editor.
