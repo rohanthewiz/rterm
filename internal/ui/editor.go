@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"strings"
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -116,6 +117,25 @@ func (e *EditorWidget) Layout(gtx layout.Context, th *Theme) layout.Dimensions {
 			)
 		},
 	)
+}
+
+// SetText replaces the editor content with the given text.
+func (e *EditorWidget) SetText(text string) {
+	n := len([]rune(text))
+	e.editor.SetText(text)
+	e.editor.SetCaret(n, n)
+}
+
+// AppendText appends text to the current editor content.
+func (e *EditorWidget) AppendText(text string) {
+	current := e.editor.Text()
+	if current != "" && !strings.HasSuffix(current, " ") {
+		current += " "
+	}
+	combined := current + text
+	n := len([]rune(combined))
+	e.editor.SetText(combined)
+	e.editor.SetCaret(n, n)
 }
 
 // Focus requests keyboard focus for the editor.
