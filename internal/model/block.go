@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -61,4 +62,16 @@ func (b *Block) OutputLines() []vt.StyledLine {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.screen.Snapshot()
+}
+
+// PlainOutput returns the output as a single plain-text string for searching.
+func (b *Block) PlainOutput() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	lines := b.screen.Snapshot()
+	parts := make([]string, len(lines))
+	for i, line := range lines {
+		parts[i] = line.PlainText()
+	}
+	return strings.Join(parts, "\n")
 }

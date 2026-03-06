@@ -2,9 +2,13 @@ package app
 
 import (
 	"image"
+	"io"
 	"os"
+	"strings"
 
 	gioapp "gioui.org/app"
+	"gioui.org/io/clipboard"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -24,6 +28,7 @@ type App struct {
 	engine    *shell.Engine
 	editor    *ui.EditorWidget
 	blockList *ui.BlockListView
+	search    *ui.SearchWidget
 }
 
 // New creates a new App instance.
@@ -38,6 +43,7 @@ func New() *App {
 	th := ui.NewTheme()
 	editor := ui.NewEditorWidget()
 	blockList := ui.NewBlockListView()
+	search := ui.NewSearchWidget()
 
 	a := &App{
 		window:    w,
@@ -45,6 +51,7 @@ func New() *App {
 		session:   session,
 		editor:    editor,
 		blockList: blockList,
+		search:    search,
 	}
 
 	a.engine = shell.NewEngine(session, w)
@@ -65,6 +72,16 @@ func (a *App) Run() error {
 		case gioapp.FrameEvent:
 			gtx := gioapp.NewContext(&ops, e)
 
+			// Handle global keyboard shortcuts (Ctrl+F for search, Ctrl+Shift+C/E for collapse/expand)
+			a.handleGlobalKeys(gtx)
+
+			// Process search events
+			if a.search.Update(gtx, a.session) {
+				// Search was closed, refocus editor
+				a.editor.Focus(gtx)
+			}
+			a.blockList.SetSearchTerm(a.search.Term())
+
 			// Process editor submit
 			if cmd, ok := a.editor.Update(gtx); ok && cmd != "" {
 				a.editor.AddHistory(cmd)
@@ -74,7 +91,50 @@ func (a *App) Run() error {
 			// Layout
 			a.layout(gtx)
 
+			// Process block actions after layout
+			for _, action := range a.blockList.PendingActions {
+				switch action.Action {
+				case ui.BlockActionCopy:
+					gtx.Execute(clipboard.WriteCmd{
+						Type: "application/text",
+						Data: io.NopCloser(strings.NewReader(action.Command)),
+					})
+				case ui.BlockActionAppend:
+					a.editor.AppendText(action.Command)
+				}
+			}
+
 			e.Frame(gtx.Ops)
+		}
+	}
+}
+
+func (a *App) handleGlobalKeys(gtx layout.Context) {
+	for {
+		ev, ok := gtx.Event(
+			key.Filter{Name: "F", Required: key.ModCtrl},
+			key.Filter{Name: "C", Required: key.ModCtrl | key.ModShift},
+			key.Filter{Name: "E", Required: key.ModCtrl | key.ModShift},
+		)
+		if !ok {
+			break
+		}
+		ke, ok := ev.(key.Event)
+		if !ok || ke.State != key.Press {
+			continue
+		}
+		switch {
+		case ke.Name == "F" && ke.Modifiers.Contain(key.ModCtrl):
+			a.search.Toggle()
+			if a.search.Visible() {
+				a.search.Focus(gtx)
+			} else {
+				a.editor.Focus(gtx)
+			}
+		case ke.Name == "C" && ke.Modifiers.Contain(key.ModCtrl|key.ModShift):
+			a.blockList.CollapseAll()
+		case ke.Name == "E" && ke.Modifiers.Contain(key.ModCtrl|key.ModShift):
+			a.blockList.ExpandAll()
 		}
 	}
 }
@@ -84,12 +144,32 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
 	paint.Fill(gtx.Ops, a.theme.BG)
 
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	children := []layout.FlexChild{
 		// Block list (takes remaining space)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return a.blockList.Layout(gtx, a.theme, a.session)
 		}),
-		// Editor divider
+	}
+
+	// Search bar (between block list and editor, if visible)
+	if a.search.Visible() {
+		children = append(children,
+			// Search divider
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				size := image.Point{X: gtx.Constraints.Max.X, Y: gtx.Dp(unit.Dp(1))}
+				defer clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops).Pop()
+				paint.Fill(gtx.Ops, a.theme.DividerColor)
+				return layout.Dimensions{Size: size}
+			}),
+			// Search widget
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.search.Layout(gtx, a.theme)
+			}),
+		)
+	}
+
+	// Editor divider
+	children = append(children,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			size := image.Point{X: gtx.Constraints.Max.X, Y: gtx.Dp(unit.Dp(1))}
 			defer clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops).Pop()
@@ -101,6 +181,8 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 			return a.editor.Layout(gtx, a.theme)
 		}),
 	)
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 // Window returns the underlying Gio window (used by main).
