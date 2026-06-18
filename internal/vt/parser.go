@@ -11,6 +11,7 @@ const (
 	stateEscape
 	stateCSIParam
 	stateOSCString
+	stateEscIgnore // swallow one byte (e.g. charset designator after ESC( / ESC))
 )
 
 // Screen holds the terminal output state for a block.
@@ -22,11 +23,11 @@ type Screen struct {
 	width    int
 
 	// Parser state
-	state   parserState
-	params  []int
-	curP    int
-	hasP    bool
-	oscBuf  []byte
+	state  parserState
+	params []int
+	curP   int
+	hasP   bool
+	oscBuf []byte
 }
 
 // NewScreen creates a screen with the given column width.
@@ -63,6 +64,9 @@ func (s *Screen) processByte(b byte) {
 		s.handleCSIParam(b)
 	case stateOSCString:
 		s.handleOSCString(b)
+	case stateEscIgnore:
+		// Swallow exactly one byte (the charset designator) and resume.
+		s.state = stateGround
 	}
 }
 
@@ -104,7 +108,7 @@ func (s *Screen) handleEscape(b byte) {
 		s.state = stateOSCString
 		s.oscBuf = s.oscBuf[:0]
 	case '(', ')': // Character set designation — ignore next byte
-		s.state = stateGround
+		s.state = stateEscIgnore
 	default:
 		// Other ESC sequences — ignore and return to ground
 		s.state = stateGround

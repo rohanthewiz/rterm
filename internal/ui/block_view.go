@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"strings"
+	"time"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -23,17 +24,17 @@ import (
 type BlockAction int
 
 const (
-	BlockActionNone BlockAction = iota
-	BlockActionCopy             // Copy command to clipboard
-	BlockActionAppend           // Append command to input buffer
+	BlockActionNone   BlockAction = iota
+	BlockActionCopy               // Copy command to clipboard
+	BlockActionAppend             // Append command to input buffer
 )
 
 // blockState holds per-block UI state that persists across frames.
 type blockState struct {
-	collapsed    bool
-	toggleClick  widget.Clickable
-	copyClick    widget.Clickable
-	appendClick  widget.Clickable
+	collapsed   bool
+	toggleClick widget.Clickable
+	copyClick   widget.Clickable
+	appendClick widget.Clickable
 }
 
 // BlockView renders a single block (header + output) with collapse/expand.
@@ -175,6 +176,19 @@ func (bv *BlockView) layoutHeader(gtx layout.Context, th *Theme, block *model.Bl
 						// Right: action buttons + status
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+								// Elapsed time / start timestamp
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									var text string
+									if done {
+										text = formatDuration(block.EndTime.Sub(block.StartTime))
+									} else {
+										text = block.StartTime.Format("15:04:05")
+									}
+									l := material.Label(th.Material, th.FontSize, text)
+									l.Font.Typeface = th.Mono
+									l.Color = th.ButtonColor
+									return l.Layout(gtx)
+								}),
 								// Copy button
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return layout.Inset{Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -329,40 +343,57 @@ func layoutStyledLine(gtx layout.Context, th *Theme, line vt.StyledLine, searchT
 }
 
 func layoutSpan(gtx layout.Context, th *Theme, txt string, style vt.Style, highlight bool) layout.Dimensions {
+	fg, bg, hasBG := spanColors(th, style)
+
+	// A search highlight background takes priority over the cell background.
 	if highlight {
-		// Draw highlight background then text on top
+		bg = th.SearchMatchBG
+		hasBG = true
+	}
+
+	if hasBG {
+		// Draw background then text (with decorations) on top.
 		return layout.Background{}.Layout(gtx,
 			func(gtx layout.Context) layout.Dimensions {
 				defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Min}).Push(gtx.Ops).Pop()
-				paint.Fill(gtx.Ops, th.SearchMatchBG)
+				paint.Fill(gtx.Ops, bg)
 				return layout.Dimensions{Size: gtx.Constraints.Min}
 			},
 			func(gtx layout.Context) layout.Dimensions {
-				return renderSpanText(gtx, th, txt, style)
+				return renderSpanText(gtx, th, txt, style, fg)
 			},
 		)
 	}
-	return renderSpanText(gtx, th, txt, style)
+	return renderSpanText(gtx, th, txt, style, fg)
 }
 
-func renderSpanText(gtx layout.Context, th *Theme, txt string, style vt.Style) layout.Dimensions {
-	l := material.Label(th.Material, th.FontSize, txt)
-	l.Font.Typeface = th.Mono
-
-	fg := th.FG
+// spanColors resolves the effective foreground/background for a style,
+// accounting for dim and inverse video.
+func spanColors(th *Theme, style vt.Style) (fg color.NRGBA, bg color.NRGBA, hasBG bool) {
+	fg = th.FG
 	if style.FGSet {
 		fg = style.FG
+	}
+	bg = th.BG
+	hasBG = style.BGSet
+	if style.BGSet {
+		bg = style.BG
+	}
+	if style.Inverse {
+		// Inverse swaps foreground and background; default to theme colors
+		// for whichever side wasn't explicitly set.
+		fg, bg = bg, fg
+		hasBG = true
 	}
 	if style.Dim {
 		fg.A = 128
 	}
-	if style.Inverse {
-		bg := th.BG
-		if style.BGSet {
-			bg = style.BG
-		}
-		fg = bg
-	}
+	return fg, bg, hasBG
+}
+
+func renderSpanText(gtx layout.Context, th *Theme, txt string, style vt.Style, fg color.NRGBA) layout.Dimensions {
+	l := material.Label(th.Material, th.FontSize, txt)
+	l.Font.Typeface = th.Mono
 	l.Color = fg
 
 	if style.Bold {
@@ -371,7 +402,32 @@ func renderSpanText(gtx layout.Context, th *Theme, txt string, style vt.Style) l
 	if style.Italic {
 		l.Font.Style = font.Italic
 	}
-	return l.Layout(gtx)
+
+	dims := l.Layout(gtx)
+
+	// material.Label has no underline/strikethrough support, so draw the
+	// decoration lines manually in the text color.
+	if style.Underline {
+		drawHRule(gtx, fg, dims.Size.X, dims.Size.Y-gtx.Dp(unit.Dp(1)))
+	}
+	if style.Strikethrough {
+		drawHRule(gtx, fg, dims.Size.X, dims.Size.Y/2)
+	}
+	return dims
+}
+
+// drawHRule paints a 1px horizontal line of the given width at vertical offset y.
+func drawHRule(gtx layout.Context, c color.NRGBA, width, y int) {
+	if width <= 0 {
+		return
+	}
+	thickness := gtx.Dp(unit.Dp(1))
+	rect := image.Rectangle{
+		Min: image.Point{X: 0, Y: y},
+		Max: image.Point{X: width, Y: y + thickness},
+	}
+	defer clip.Rect(rect).Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, c)
 }
 
 // byteToCharIndex converts a byte offset in a string to a rune/char index.
@@ -384,6 +440,23 @@ func byteToCharIndex(s string, byteOffset int) int {
 		charIdx++
 	}
 	return charIdx
+}
+
+// formatDuration renders a command's run time compactly (e.g. "12ms", "1.4s",
+// "2m3s").
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Millisecond:
+		return "<1ms"
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	default:
+		m := int(d.Minutes())
+		sec := int(d.Seconds()) - m*60
+		return fmt.Sprintf("%dm%ds", m, sec)
+	}
 }
 
 // shortenPath abbreviates long paths.

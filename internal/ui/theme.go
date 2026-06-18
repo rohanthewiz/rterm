@@ -26,11 +26,10 @@ type Theme struct {
 	PromptColor  color.NRGBA
 
 	// Block action buttons
-	ButtonColor    color.NRGBA
-	ButtonHover    color.NRGBA
-	SearchBG       color.NRGBA
-	SearchMatchBG  color.NRGBA
-	CollapseColor  color.NRGBA
+	ButtonColor   color.NRGBA
+	SearchBG      color.NRGBA
+	SearchMatchBG color.NRGBA
+	CollapseColor color.NRGBA
 
 	// Text sizing
 	FontSize unit.Sp
@@ -56,7 +55,6 @@ func NewTheme() *Theme {
 		PromptColor:  color.NRGBA{R: 85, G: 255, B: 255, A: 255},
 
 		ButtonColor:   color.NRGBA{R: 130, G: 130, B: 130, A: 255},
-		ButtonHover:   color.NRGBA{R: 200, G: 200, B: 200, A: 255},
 		SearchBG:      color.NRGBA{R: 50, G: 50, B: 50, A: 255},
 		SearchMatchBG: color.NRGBA{R: 100, G: 80, B: 0, A: 255},
 		CollapseColor: color.NRGBA{R: 130, G: 130, B: 130, A: 255},

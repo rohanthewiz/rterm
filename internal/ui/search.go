@@ -3,6 +3,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"strconv"
 	"strings"
 
 	"gioui.org/io/key"
@@ -18,9 +19,9 @@ import (
 
 // SearchWidget provides search across all blocks or within a specific block.
 type SearchWidget struct {
-	editor   widget.Editor
-	visible  bool
-	close    widget.Clickable
+	editor     widget.Editor
+	visible    bool
+	close      widget.Clickable
 	matchCount int
 }
 
@@ -38,11 +39,6 @@ func (s *SearchWidget) Toggle() {
 		s.editor.SetText("")
 		s.matchCount = 0
 	}
-}
-
-// Show makes the search bar visible.
-func (s *SearchWidget) Show() {
-	s.visible = true
 }
 
 // Hide hides the search bar and clears the search term.
@@ -158,7 +154,7 @@ func (s *SearchWidget) Layout(gtx layout.Context, th *Theme) layout.Dimensions {
 							}
 							text := "no matches"
 							if s.matchCount > 0 {
-								text = strings.Join([]string{intToStr(s.matchCount), " match"}, "")
+								text = strconv.Itoa(s.matchCount) + " match"
 								if s.matchCount != 1 {
 									text += "es"
 								}
@@ -202,24 +198,4 @@ func countMatches(session *model.Session, term string) int {
 		count += strings.Count(strings.ToLower(block.PlainOutput()), lowerTerm)
 	}
 	return count
-}
-
-// intToStr converts an int to string without importing strconv.
-func intToStr(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	if n < 0 {
-		return "-" + intToStr(-n)
-	}
-	digits := make([]byte, 0, 10)
-	for n > 0 {
-		digits = append(digits, byte('0'+n%10))
-		n /= 10
-	}
-	// Reverse
-	for i, j := 0, len(digits)-1; i < j; i, j = i+1, j-1 {
-		digits[i], digits[j] = digits[j], digits[i]
-	}
-	return string(digits)
 }

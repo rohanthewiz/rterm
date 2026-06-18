@@ -3,7 +3,7 @@ package ui
 // History provides simple in-memory command history with navigation.
 type History struct {
 	entries []string
-	pos     int  // current navigation position; len(entries) means "at bottom"
+	pos     int    // current navigation position; len(entries) means "at bottom"
 	saved   string // text saved when user starts navigating up
 }
 

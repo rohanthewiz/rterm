@@ -193,3 +193,14 @@ func TestClearScreen(t *testing.T) {
 		t.Errorf("expected cursor at (0,0), got (%d,%d)", s.curRow, s.curCol)
 	}
 }
+
+func TestCharsetDesignatorSwallowed(t *testing.T) {
+	s := NewScreen(80)
+	// ESC(B designates the ASCII charset; the trailing 'B' must not be printed.
+	s.Process([]byte("a\x1b(Bb"))
+
+	got := s.Lines[0].PlainText()
+	if got != "ab" {
+		t.Fatalf("expected %q, got %q", "ab", got)
+	}
+}
