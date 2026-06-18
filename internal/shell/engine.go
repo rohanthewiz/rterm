@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/creack/pty"
 	"github.com/rohanthewiz/rterm/internal/model"
@@ -21,6 +22,9 @@ type Engine struct {
 	Session *model.Session
 	CWD     string
 	inv     Invalidator
+
+	mu         sync.Mutex
+	rows, cols int
 }
 
 // NewEngine creates a new shell engine.
@@ -33,7 +37,50 @@ func NewEngine(session *model.Session, inv Invalidator) *Engine {
 		Session: session,
 		CWD:     cwd,
 		inv:     inv,
+		rows:    24,
+		cols:    80,
 	}
+}
+
+// SetSize updates the terminal dimensions for new commands and resizes any
+// currently-running command's pty (which delivers SIGWINCH to the child).
+func (e *Engine) SetSize(rows, cols int) {
+	if rows <= 0 || cols <= 0 {
+		return
+	}
+	e.mu.Lock()
+	if rows == e.rows && cols == e.cols {
+		e.mu.Unlock()
+		return
+	}
+	e.rows, e.cols = rows, cols
+	e.mu.Unlock()
+
+	e.Session.SetCols(cols)
+	for _, b := range e.Session.Blocks() {
+		if !b.Done() {
+			b.Resize(rows, cols)
+		}
+	}
+}
+
+func (e *Engine) size() (rows, cols int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.rows, e.cols
+}
+
+// InterruptLatest sends ^C to the most recently started running command.
+// Returns true if a running command was found.
+func (e *Engine) InterruptLatest() bool {
+	blocks := e.Session.Blocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if !blocks[i].Done() {
+			_ = blocks[i].Interrupt()
+			return true
+		}
+	}
+	return false
 }
 
 // Execute runs a command asynchronously and returns the block tracking it.
@@ -110,7 +157,19 @@ func (e *Engine) runCommand(block *model.Block, command string) {
 	}
 	defer ptmx.Close()
 
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+	rows, cols := e.size()
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+
+	// Let the UI interrupt (^C) and resize this command while it runs.
+	block.SetController(
+		func() error {
+			_, err := ptmx.Write([]byte{0x03})
+			return err
+		},
+		func(r, c int) error {
+			return pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(r), Cols: uint16(c)})
+		},
+	)
 
 	buf := make([]byte, 4096)
 	for {

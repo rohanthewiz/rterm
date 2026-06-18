@@ -72,6 +72,10 @@ func (a *App) Run() error {
 		case gioapp.FrameEvent:
 			gtx := gioapp.NewContext(&ops, e)
 
+			// Derive terminal dimensions from the window size and push them to
+			// the engine (resizes running commands; sets width for new ones).
+			a.updateTerminalSize(gtx)
+
 			// Handle global keyboard shortcuts (Ctrl+F for search, Ctrl+Shift+C/E for collapse/expand)
 			a.handleGlobalKeys(gtx)
 
@@ -109,10 +113,35 @@ func (a *App) Run() error {
 	}
 }
 
+// updateTerminalSize computes the column/row count that fits the current window
+// and forwards it to the engine.
+func (a *App) updateTerminalSize(gtx layout.Context) {
+	cell := a.theme.CellSize(gtx)
+	if cell.X <= 0 || cell.Y <= 0 {
+		return
+	}
+
+	// Approximate non-output chrome: block insets/left border horizontally and
+	// the pinned editor vertically.
+	const hChrome = 28
+	const vChrome = 56
+
+	cols := (gtx.Constraints.Max.X - hChrome) / cell.X
+	rows := (gtx.Constraints.Max.Y - vChrome) / cell.Y
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	a.engine.SetSize(rows, cols)
+}
+
 func (a *App) handleGlobalKeys(gtx layout.Context) {
 	for {
 		ev, ok := gtx.Event(
 			key.Filter{Name: "F", Required: key.ModCtrl},
+			key.Filter{Name: "C", Required: key.ModCtrl},
 			key.Filter{Name: "C", Required: key.ModCtrl | key.ModShift},
 			key.Filter{Name: "E", Required: key.ModCtrl | key.ModShift},
 		)
@@ -135,6 +164,9 @@ func (a *App) handleGlobalKeys(gtx layout.Context) {
 			a.blockList.CollapseAll()
 		case ke.Name == "E" && ke.Modifiers.Contain(key.ModCtrl|key.ModShift):
 			a.blockList.ExpandAll()
+		case ke.Name == "C" && ke.Modifiers.Contain(key.ModCtrl):
+			// Interrupt the most recent running command (terminal ^C).
+			a.engine.InterruptLatest()
 		}
 	}
 }

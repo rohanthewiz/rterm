@@ -21,11 +21,21 @@ func NewSession(cols int) *Session {
 // AddBlock creates a new block, appends it to the session, and returns it.
 func (s *Session) AddBlock(command, cwd string) *Block {
 	id := s.nextID.Add(1)
-	b := NewBlock(id, command, cwd, s.cols)
 	s.mu.Lock()
+	b := NewBlock(id, command, cwd, s.cols)
 	s.blocks = append(s.blocks, b)
 	s.mu.Unlock()
 	return b
+}
+
+// SetCols updates the terminal width used for new blocks.
+func (s *Session) SetCols(cols int) {
+	if cols <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.cols = cols
+	s.mu.Unlock()
 }
 
 // Blocks returns a snapshot of all blocks.

@@ -38,6 +38,14 @@ func NewScreen(width int) *Screen {
 	}
 }
 
+// SetWidth updates the column at which subsequent output wraps. Already-laid
+// lines are left untouched.
+func (s *Screen) SetWidth(w int) {
+	if w > 0 {
+		s.width = w
+	}
+}
+
 // Process feeds raw bytes from terminal output into the parser.
 func (s *Screen) Process(data []byte) {
 	for len(data) > 0 {

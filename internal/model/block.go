@@ -17,9 +17,11 @@ type Block struct {
 	ExitCode  int    // -1 while running
 	CWD       string // working directory at execution time
 
-	mu     sync.Mutex
-	screen *vt.Screen
-	done   bool
+	mu        sync.Mutex
+	screen    *vt.Screen
+	done      bool
+	interrupt func() error               // sends an interrupt (^C) to the process, if running
+	resize    func(rows, cols int) error // resizes the underlying pty, if running
 }
 
 // NewBlock creates a new block for the given command.
@@ -41,6 +43,41 @@ func (b *Block) AppendOutput(data []byte) {
 	b.screen.Process(data)
 }
 
+// SetController registers callbacks the UI can use to interrupt or resize the
+// running process. The engine calls this once the process has started.
+func (b *Block) SetController(interrupt func() error, resize func(rows, cols int) error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.interrupt = interrupt
+	b.resize = resize
+}
+
+// Interrupt sends an interrupt signal (^C) to the running process. It is a
+// no-op if the block has already finished.
+func (b *Block) Interrupt() error {
+	b.mu.Lock()
+	fn := b.interrupt
+	b.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
+// Resize updates the running process's pty dimensions and the output wrap
+// width used for subsequent output. Safe to call on a finished block.
+func (b *Block) Resize(rows, cols int) {
+	b.mu.Lock()
+	fn := b.resize
+	if b.screen != nil {
+		b.screen.SetWidth(cols)
+	}
+	b.mu.Unlock()
+	if fn != nil {
+		_ = fn(rows, cols)
+	}
+}
+
 // Finish marks the block as complete with the given exit code.
 func (b *Block) Finish(exitCode int) {
 	b.mu.Lock()
@@ -48,6 +85,9 @@ func (b *Block) Finish(exitCode int) {
 	b.ExitCode = exitCode
 	b.EndTime = time.Now()
 	b.done = true
+	// Drop controller callbacks; the process is gone.
+	b.interrupt = nil
+	b.resize = nil
 }
 
 // Done reports whether the command has finished.
